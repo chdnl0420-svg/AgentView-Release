@@ -1,4 +1,4 @@
-name: Hide old releases (draft)
+name: Hide old releases (draft) + strip old setup assets
 
 on:
   release:
@@ -8,10 +8,10 @@ permissions:
   contents: write
 
 jobs:
-  hide:
+  hide-and-strip:
     runs-on: ubuntu-latest
     steps:
-      - name: Convert all OTHER releases to drafts (invisible to non-collaborators)
+      - name: Draft prior releases and delete their setup .exe assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEEP_TAG: ${{ github.event.release.tag_name }}
@@ -20,16 +20,29 @@ jobs:
           set -euo pipefail
           echo "Keeping public: $KEEP_TAG"
 
-          # For every release except the one just published, PATCH draft=true.
-          # Drafts disappear from the public /releases listing and from the
-          # `/releases/latest` endpoint, but the underlying git tag stays.
-          # Collaborators can still see them on the repo's Releases page.
+          # For every release EXCEPT the one just published:
+          #   1. Strip every asset (we only want the latest release to hold a
+          #      downloadable AgentView-Setup.exe ??old setups must vanish).
+          #   2. PATCH draft=true so the release leaves the public listing
+          #      but its tag, body, and id are preserved for the changelog.
+          # Tags are never touched here ??they stay on the repo so old commits
+          # remain reachable.
           gh api -X GET "repos/$REPO/releases" --paginate \
-            --jq ".[] | select(.tag_name != \"$KEEP_TAG\" and .draft == false) | .id" \
+            --jq ".[] | select(.tag_name != \"$KEEP_TAG\") | .id" \
             | while read -r rid; do
                 [ -z "$rid" ] && continue
-                echo "Drafting release id=$rid"
-                gh api -X PATCH "repos/$REPO/releases/$rid" -f draft=true >/dev/null
+                echo "=== Cleaning release id=$rid ==="
+                # Delete every asset under this release
+                gh api -X GET "repos/$REPO/releases/$rid/assets" --paginate \
+                  --jq ".[] | .id" \
+                  | while read -r aid; do
+                      [ -z "$aid" ] && continue
+                      echo "  removing asset id=$aid"
+                      gh api -X DELETE "repos/$REPO/releases/assets/$aid" || true
+                    done
+                # Then draft the release itself (idempotent if already draft)
+                echo "  drafting release id=$rid"
+                gh api -X PATCH "repos/$REPO/releases/$rid" -f draft=true >/dev/null || true
               done
 
-          echo "Done. Public release: $KEEP_TAG. All others are now drafts."
+          echo "Done. Latest release ($KEEP_TAG) keeps its assets; everything else is asset-less + draft."
