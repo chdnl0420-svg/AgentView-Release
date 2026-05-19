@@ -1,0 +1,41 @@
+name: Keep only latest release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all releases except the one just published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "Keeping: $KEEP_TAG"
+
+          # 1) Delete all OTHER releases (by id) — keeps the one just published
+          gh api -X GET "repos/$REPO/releases" --paginate \
+            --jq ".[] | select(.tag_name != \"$KEEP_TAG\") | .id" \
+            | while read -r rid; do
+                [ -z "$rid" ] && continue
+                echo "Deleting release id=$rid"
+                gh api -X DELETE "repos/$REPO/releases/$rid"
+              done
+
+          # 2) Delete all OTHER tags
+          gh api -X GET "repos/$REPO/tags" --paginate \
+            --jq ".[] | select(.name != \"$KEEP_TAG\") | .name" \
+            | while read -r tag; do
+                [ -z "$tag" ] && continue
+                echo "Deleting tag refs/tags/$tag"
+                gh api -X DELETE "repos/$REPO/git/refs/tags/$tag" || true
+              done
+
+          echo "Done. Only $KEEP_TAG remains."
