@@ -40,9 +40,12 @@ jobs:
                       echo "  removing asset id=$aid"
                       gh api -X DELETE "repos/$REPO/releases/assets/$aid" || true
                     done
-                # Then draft the release itself (idempotent if already draft)
+                # Then draft the release itself (idempotent if already draft).
+                # -F (not -f) makes gh send draft as a JSON boolean ??without
+                # this the field arrives as the string "true" and is silently
+                # ignored, so the release stays public.
                 echo "  drafting release id=$rid"
-                gh api -X PATCH "repos/$REPO/releases/$rid" -f draft=true >/dev/null || true
+                gh api -X PATCH "repos/$REPO/releases/$rid" -F draft=true >/dev/null || true
               done
 
           echo "Done. Latest release ($KEEP_TAG) keeps its assets; everything else is asset-less + draft."
