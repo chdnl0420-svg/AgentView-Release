@@ -1,4 +1,4 @@
-name: Keep only latest release
+name: Hide old releases (draft)
 
 on:
   release:
@@ -8,34 +8,28 @@ permissions:
   contents: write
 
 jobs:
-  cleanup:
+  hide:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete all releases except the one just published
+      - name: Convert all OTHER releases to drafts (invisible to non-collaborators)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEEP_TAG: ${{ github.event.release.tag_name }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          echo "Keeping: $KEEP_TAG"
+          echo "Keeping public: $KEEP_TAG"
 
-          # 1) Delete all OTHER releases (by id) — keeps the one just published
+          # For every release except the one just published, PATCH draft=true.
+          # Drafts disappear from the public /releases listing and from the
+          # `/releases/latest` endpoint, but the underlying git tag stays.
+          # Collaborators can still see them on the repo's Releases page.
           gh api -X GET "repos/$REPO/releases" --paginate \
-            --jq ".[] | select(.tag_name != \"$KEEP_TAG\") | .id" \
+            --jq ".[] | select(.tag_name != \"$KEEP_TAG\" and .draft == false) | .id" \
             | while read -r rid; do
                 [ -z "$rid" ] && continue
-                echo "Deleting release id=$rid"
-                gh api -X DELETE "repos/$REPO/releases/$rid"
+                echo "Drafting release id=$rid"
+                gh api -X PATCH "repos/$REPO/releases/$rid" -f draft=true >/dev/null
               done
 
-          # 2) Delete all OTHER tags
-          gh api -X GET "repos/$REPO/tags" --paginate \
-            --jq ".[] | select(.name != \"$KEEP_TAG\") | .name" \
-            | while read -r tag; do
-                [ -z "$tag" ] && continue
-                echo "Deleting tag refs/tags/$tag"
-                gh api -X DELETE "repos/$REPO/git/refs/tags/$tag" || true
-              done
-
-          echo "Done. Only $KEEP_TAG remains."
+          echo "Done. Public release: $KEEP_TAG. All others are now drafts."
